@@ -1,4 +1,4 @@
-import { Bot, session, Keyboard } from 'grammy';
+import { Bot, session, Keyboard, InputFile } from 'grammy';
 import * as dotenv from "dotenv";
 dotenv.config();
 
@@ -115,11 +115,14 @@ function adminPanelMenu() {
 // Обработка команды /start
 bot.command('start', async (ctx) => {
     // Всегда показываем обычное главное меню, даже для админа
-    await ctx.reply(
-        'Привет! Я - официальный бот Колледжа предпринимательства №11. ' +
-        'Выберите интересующий вас раздел или задайте вопрос:',
-        { reply_markup: mainMenu(ctx.session.isAdmin, ctx.from?.id) }
-    );
+    await ctx.replyWithPhoto(
+        new InputFile('./src/assets/owl_hi.png'),
+        {
+            caption: 'Привет! Я - официальный бот Колледжа предпринимательства №11. ' +
+            'Выберите интересующий вас раздел или задайте вопрос:',
+            reply_markup: mainMenu(ctx.session.isAdmin, ctx.from?.id)
+        }
+    )
 });
 
 
