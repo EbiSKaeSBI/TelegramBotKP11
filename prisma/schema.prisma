@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  telegramId BigInt   @id
+  name       String?
+  email      String?
+  complaints Complaint[]
+  professionStories ProfessionStory[]
+}
+
+model Complaint {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [telegramId], references: [telegramId])
+  telegramId BigInt
+  text      String
+  status    ComplaintStatus @default(NEW)
+  createdAt DateTime @default(now())
+  reviewedAt DateTime?
+  closedAt  DateTime?
+}
+
+model ProfessionStory {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [telegramId], references: [telegramId])
+  telegramId BigInt
+  text      String
+  status    ProfessionStoryStatus @default(NEW)
+  createdAt DateTime @default(now())
+  reviewedAt DateTime?
+  closedAt  DateTime?
+}
+
+model FAQ {
+  id       Int    @id @default(autoincrement())
+  question String
+  answer   String
+}
+
+enum ComplaintStatus {
+  NEW
+  REVIEWED
+  CLOSED
+}
+
+enum ProfessionStoryStatus {
+  NEW
+  REVIEWED
+  CLOSED
+}
+
+
