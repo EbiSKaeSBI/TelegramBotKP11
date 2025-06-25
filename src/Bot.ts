@@ -363,6 +363,57 @@ bot.on("message:text", async (ctx, next) => {
         return;
     }
 
+    // Обработка поиска ответа через AI
+    if (ctx.session.state === "search") {
+        // Если пользователь нажал "⬅️ Выйти в меню", сразу возвращаем главное меню
+        if (ctx.message.text?.trim() === "⬅️ Выйти в меню") {
+            ctx.session.state = undefined;
+            await ctx.reply("Главное меню:", { reply_markup: await mainMenu(ctx.session.isAdmin, ctx.from?.id) });
+            return;
+        }
+        try {
+            // Проверяем, что пользователь ввел не пустое сообщение
+            const userMessage = ctx.message.text?.trim();
+            console.log('🔍 Режим поиска - сообщение пользователя:', JSON.stringify(ctx.message.text));
+            console.log('🔍 Режим поиска - очищенное сообщение:', JSON.stringify(userMessage));
+            
+            if (!userMessage || userMessage === '') {
+                console.log('⚠️ Пользователь отправил пустое сообщение в режиме поиска');
+                await ctx.reply("Пожалуйста, введите ваш вопрос. Сообщение не может быть пустым.", {
+                    reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized()
+                });
+                return;
+            }
+            
+            // Показываем индикатор загрузки
+            await ctx.reply("🔍 Ищу ответ на ваш вопрос...");
+            
+            // Отправляем запрос к AI
+            const aiResponse = await processUserMessage(userMessage);
+            
+            // Проверяем, что ответ не пустой
+            const trimmedResponse = aiResponse?.trim();
+            if (!trimmedResponse || trimmedResponse === '') {
+                await ctx.reply("Извините, не удалось найти подходящий ответ на ваш вопрос. Попробуйте переформулировать вопрос.", {
+                    reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized()
+                });
+                return;
+            }
+            
+            // Отправляем ответ от AI
+            await sendMessageWithMarkdown(ctx, trimmedResponse, new Keyboard().text("⬅️ Выйти в меню").resized());
+            
+            // Остаёмся в режиме поиска для возможности задать ещё вопрос
+            return;
+        } catch (error) {
+            console.error('Ошибка при обработке запроса к AI:', error);
+            await ctx.reply("Извините, произошла ошибка при поиске ответа. Попробуйте позже.", {
+                reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized()
+            });
+            return;
+        }
+    }
+
     await next();
 });
 
@@ -555,7 +606,21 @@ bot.on("message:text", async (ctx, next) => {
             if (totalPages > 1 && page + 1 < totalPages) navRow.push("Далее");
             navRow.push("⬅️ Выйти в меню");
             kb.row(...navRow);
-            await ctx.reply(`Вопрос: ${faq.question}\nОтвет: ${faq.answer}`, { reply_markup: kb.resized() });
+            
+            // Форматируем ответ FAQ с HTML
+            const faqText = `<b>Вопрос:</b> ${faq.question}\n\n<b>Ответ:</b> ${faq.answer}`;
+            
+            try {
+                await ctx.reply(faqText, {
+                    parse_mode: 'HTML',
+                    reply_markup: kb.resized()
+                });
+            } catch (error) {
+                console.warn('⚠️ Ошибка при отправке FAQ с HTML, отправляем как обычный текст:', error);
+                await ctx.reply(`Вопрос: ${faq.question}\n\nОтвет: ${faq.answer}`, {
+                    reply_markup: kb.resized()
+                });
+            }
             return;
         }
     }
@@ -578,4 +643,12 @@ export const startBot = () => {
 function isValidEmail(email: string): boolean {
     // Простой, но строгий паттерн
     return /^[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}$/.test(email.trim());
+}
+
+// Функция для безопасной отправки сообщений с Markdown
+async function sendMessageWithMarkdown(ctx: any, text: string, reply_markup?: any) {
+    // Поскольку мы уже очистили текст от Markdown, отправляем как обычный текст
+    await ctx.reply(text, {
+        reply_markup
+    });
 }
