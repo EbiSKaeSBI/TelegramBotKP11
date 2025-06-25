@@ -16,8 +16,8 @@ async function query(data: { question: string }): Promise<any> {
 
 export async function processUserMessage(userMessage: string): Promise<string> {
     try {
-        const response = await query({ question: userMessage });
-        return response.response || 'Извините, не удалось получить ответ.';
+        const response = await query({ "question": userMessage });
+        return response.response;
     } catch (error) {
         console.error('Error in FlowiseAI processing:', error);
         return 'Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.';

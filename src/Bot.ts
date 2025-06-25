@@ -6,6 +6,7 @@ dotenv.config();
 import { processUserMessage } from './services/flowise-ai';
 import { faqs, complaints, ADMINS, professionStories, userNames, userEmails, finishedComplaints, reviewedComplaints } from './constants';
 import { SessionData, FAQ, Complaint, MyContext } from './types';
+import { sessionMiddleware, adminCheckMiddleware, errorHandler } from './middleware';
 
 // Проверяем наличие токена
 if (!process.env.TELEGRAM_BOT_TOKEN) {
@@ -82,20 +83,10 @@ function parentCabinetMenu() {
 // Создаем инстанс бота с типизацией
 const bot = new Bot<MyContext>(process.env.TELEGRAM_BOT_TOKEN);
 
-// Добавляем middleware для работы с сессиями
-bot.use(session({
-    initial: (): SessionData => ({
-        isAdmin: false
-    })
-}));
-
-// Проверка на админа при каждом сообщении
-bot.use(async (ctx, next) => {
-    if (ctx.from?.id) {
-        ctx.session.isAdmin = ADMINS.includes(ctx.from.id);
-    }
-    await next();
-});
+// Используем middleware
+bot.use(sessionMiddleware);
+bot.use(adminCheckMiddleware);
+errorHandler(bot);
 
 // Клавиатура админ-панели
 function adminPanelMenu() {
@@ -103,8 +94,6 @@ function adminPanelMenu() {
         .text("📋 Жалобы")
         .row()
         .text("❓ FAQ")
-        .row()
-        .text("📊 Статистика")
         .row()
         .text("📬 Истории о профессии")
         .row()
@@ -219,8 +208,58 @@ bot.hears("⬅️ Назад", async (ctx) => {
 });
 
 // Примеры обработки подблоков (можно расширить)
-bot.hears(["🗓️ Расписание", "📖 Содержание программ", "🎓 Дополнительное образование"], async (ctx) => {
-    await ctx.reply(`Информация по разделу: ${ctx.message?.text ?? ""}`, { reply_markup: eduProcessMenu() });
+bot.hears("🗓️ Расписание", async (ctx) => {
+    const text = `
+<b>Расписание учебных занятий и каникул</b>
+
+Актуальное расписание занятий, а также график каникул для студентов колледжа вы всегда можете найти на официальном сайте колледжа по ссылке:
+https://kp11.mskobr.ru/uchashimsya/raspisanie-kanikuly
+
+На странице представлены:
+• Расписание учебных занятий для всех курсов и групп
+• График учебных периодов и каникул на текущий учебный год
+• Важные объявления по изменениям в расписании
+
+Пожалуйста, регулярно проверяйте расписание на сайте, чтобы быть в курсе возможных изменений!
+    `;
+    await ctx.reply(text, { parse_mode: 'HTML', reply_markup: eduProcessMenu() });
+});
+
+bot.hears("📖 Содержание программ", async (ctx) => {
+    const text = `
+<b>Содержание образовательных программ</b>
+
+Подробную информацию о реализуемых образовательных программах, учебных планах, аннотациях и рабочих программах дисциплин вы можете найти на официальном сайте колледжа по ссылке:
+https://kp11.mskobr.ru/info_edu/education
+
+На странице представлены:
+• Перечень образовательных программ, реализуемых в колледже
+• Учебные планы по специальностям
+• Аннотации к программам и рабочие программы дисциплин
+• Информация о методических материалах
+
+Пожалуйста, ознакомьтесь с актуальной информацией на сайте для получения полного представления о содержании образовательных программ.
+    `;
+    await ctx.reply(text, { parse_mode: 'HTML', reply_markup: eduProcessMenu() });
+});
+
+bot.hears("🎓 Дополнительное образование", async (ctx) => {
+    const text = `
+<b>🎓 Дополнительное образование</b>
+
+Колледж предлагает широкий спектр дополнительных образовательных программ, направленных на развитие профессиональных и личностных компетенций студентов. 
+
+На официальном сайте колледжа вы можете ознакомиться с перечнем программ дополнительного образования, узнать о содержании курсов, условиях поступления и расписании занятий:
+https://kp11.mskobr.ru/info_edu/education
+
+В разделе представлены:
+• Программы профессионального обучения и повышения квалификации
+• Краткосрочные курсы и мастер-классы
+• Возможности для получения новых знаний и навыков по востребованным направлениям
+
+Рекомендуем регулярно посещать сайт для получения актуальной информации о новых программах и возможностях дополнительного образования!
+    `;
+    await ctx.reply(text, { parse_mode: 'HTML', reply_markup: eduProcessMenu() });
 });
 
 bot.hears("🧠 Психологическая консультация", async (ctx) => {
@@ -317,58 +356,179 @@ bot.hears("🛠️ Админ-панель", async (ctx) => {
     await ctx.reply("Админ-панель:", { reply_markup: adminPanelMenu() });
 });
 
-// Просмотр жалоб
+// Просмотр жалоб (теперь по userId)
 bot.hears("📋 Жалобы", async (ctx) => {
     if (!ctx.session.isAdmin || ctx.session.state !== "admin_panel") return;
-    let message = '📝 Последние жалобы:\n\n';
-    if (complaints.length === 0) message += 'Жалоб нет.';
-    complaints.forEach((complaint, idx) => {
-        const name = userNames[complaint.userId] ? ` (${userNames[complaint.userId]})` : '';
-        const email = userEmails[complaint.userId] ? `, email: ${userEmails[complaint.userId]}` : '';
-        message += `#${complaint.userId}${name}${email}: ${complaint.text}\nСтатус: ${complaint.status}\nДата: ${complaint.date.toLocaleString()}\n\n`;
-    });
-    const kb = new Keyboard().text("Завершить").row().text("⬅️ Назад в админ-панель").resized();
-    await ctx.reply(message, { reply_markup: kb });
-    ctx.session.state = "admin_panel_complaints";
-});
-
-// Кнопка Завершить — показать список жалоб для завершения
-bot.hears("Завершить", async (ctx) => {
-    if (!ctx.session.isAdmin || ctx.session.state !== "admin_panel_complaints") return;
-    if (complaints.length === 0) {
-        await ctx.reply('Жалоб для завершения нет.', { reply_markup: new Keyboard().text("⬅️ Назад в админ-панель").resized() });
+    // Собираем уникальные userId с жалобами
+    const userIds = [...new Set(complaints.map(c => c.userId))];
+    if (userIds.length === 0) {
+        await ctx.reply('Жалоб нет.', { reply_markup: new Keyboard().text("⬅️ Назад в админ-панель").resized() });
         return;
     }
-    // Клавиатура: каждая жалоба — отдельная кнопка (по userId и части текста)
     const kb = new Keyboard();
-    complaints.forEach((complaint, idx) => {
-        const shortText = complaint.text.length > 20 ? complaint.text.slice(0, 20) + '...' : complaint.text;
-        kb.text(`Завершить жалобу #${complaint.userId} (${shortText})`);
-        if ((idx + 1) % 2 === 0) kb.row();
+    userIds.forEach((userId, idx) => {
+        const name = userNames[userId] ? ` (${userNames[userId]})` : '';
+        const email = userEmails[userId] ? `, email: ${userEmails[userId]}` : '';
+        kb.text(`Пользователь #${userId}${name}${email}`);
+        if ((idx + 1) % 1 === 0) kb.row();
     });
-    kb.row().text("⬅️ Назад в админ-панель").resized();
-    await ctx.reply('Выберите жалобу для завершения:', { reply_markup: kb });
-    ctx.session.state = "admin_panel_complaints_finish";
+    kb.text("⬅️ Назад в админ-панель").resized();
+    await ctx.reply('Выберите пользователя для просмотра жалоб:', { reply_markup: kb });
+    ctx.session.state = "admin_panel_complaints_users";
 });
 
-// Завершение жалобы по кнопке из списка
-bot.hears(/^Завершить жалобу #(\d+) \(.+\)$/, async (ctx) => {
-    if (!ctx.session.isAdmin || ctx.session.state !== "admin_panel_complaints_finish") return;
+// При выборе пользователя — показываем список его жалоб (кнопки) с пагинацией
+bot.hears(/^Пользователь #(\d+)/, async (ctx) => {
+    if (!ctx.session.isAdmin || ctx.session.state !== "admin_panel_complaints_users") return;
     const userId = Number(ctx.match[1]);
-    const idx = complaints.findIndex(c => c.userId === userId);
-    if (idx === -1) {
-        await ctx.reply('Жалоба не найдена.', { reply_markup: adminPanelMenu() });
+    const userComplaints = complaints.filter(c => c.userId === userId);
+    if (userComplaints.length === 0) {
+        await ctx.reply('Жалоб у пользователя нет.', { reply_markup: new Keyboard().text("⬅️ Назад к пользователям").resized() });
         return;
     }
+    const page = 0;
+    const pageSize = 4;
+    const totalPages = Math.ceil(userComplaints.length / pageSize);
+    const complaintsPage = userComplaints.slice(page * pageSize, (page + 1) * pageSize);
+    const kb = new Keyboard();
+    complaintsPage.forEach((complaint, idx) => {
+        const shortText = complaint.text.length > 20 ? complaint.text.slice(0, 20) + '...' : complaint.text;
+        kb.text(`Жалоба #${complaint.date.getTime()} (${shortText})`);
+        if ((idx + 1) % 1 === 0) kb.row();
+    });
+    if (totalPages > 1) {
+        kb.text("Далее");
+    }
+    kb.text("⬅️ Назад к пользователям").resized();
+    await ctx.reply(`Выберите жалобу для просмотра (стр. ${page + 1} из ${totalPages}):`, { reply_markup: kb });
+    ctx.session.state = `admin_panel_complaints_list_${userId}_page_${page}`;
+});
+
+// Пагинация: Далее
+bot.hears("Далее", async (ctx) => {
+    if (!ctx.session.isAdmin || !ctx.session.state?.startsWith("admin_panel_complaints_list_")) return;
+    const match = ctx.session.state.match(/^admin_panel_complaints_list_(\d+)_page_(\d+)$/);
+    if (!match) return;
+    const userId = Number(match[1]);
+    let page = Number(match[2]);
+    const userComplaints = complaints.filter(c => c.userId === userId);
+    const pageSize = 4;
+    const totalPages = Math.ceil(userComplaints.length / pageSize);
+    if (page + 1 >= totalPages) return;
+    page++;
+    const complaintsPage = userComplaints.slice(page * pageSize, (page + 1) * pageSize);
+    const kb = new Keyboard();
+    complaintsPage.forEach((complaint, idx) => {
+        const shortText = complaint.text.length > 20 ? complaint.text.slice(0, 20) + '...' : complaint.text;
+        kb.text(`Жалоба #${complaint.date.getTime()} (${shortText})`);
+        if ((idx + 1) % 1 === 0) kb.row();
+    });
+    if (page > 0) kb.text("Назад");
+    if (page + 1 < totalPages) kb.text("Далее");
+    kb.text("⬅️ Назад к пользователям").resized();
+    await ctx.reply(`Выберите жалобу для просмотра (стр. ${page + 1} из ${totalPages}):`, { reply_markup: kb });
+    ctx.session.state = `admin_panel_complaints_list_${userId}_page_${page}`;
+});
+
+// Пагинация: Назад
+bot.hears("Назад", async (ctx) => {
+    if (!ctx.session.isAdmin || !ctx.session.state?.startsWith("admin_panel_complaints_list_")) return;
+    const match = ctx.session.state.match(/^admin_panel_complaints_list_(\d+)_page_(\d+)$/);
+    if (!match) return;
+    const userId = Number(match[1]);
+    let page = Number(match[2]);
+    if (page === 0) return;
+    page--;
+    const userComplaints = complaints.filter(c => c.userId === userId);
+    const pageSize = 4;
+    const totalPages = Math.ceil(userComplaints.length / pageSize);
+    const complaintsPage = userComplaints.slice(page * pageSize, (page + 1) * pageSize);
+    const kb = new Keyboard();
+    complaintsPage.forEach((complaint, idx) => {
+        const shortText = complaint.text.length > 20 ? complaint.text.slice(0, 20) + '...' : complaint.text;
+        kb.text(`Жалоба #${complaint.date.getTime()} (${shortText})`);
+        if ((idx + 1) % 1 === 0) kb.row();
+    });
+    if (page > 0) kb.text("Назад");
+    if (page + 1 < totalPages) kb.text("Далее");
+    kb.text("⬅️ Назад к пользователям").resized();
+    await ctx.reply(`Выберите жалобу для просмотра (стр. ${page + 1} из ${totalPages}):`, { reply_markup: kb });
+    ctx.session.state = `admin_panel_complaints_list_${userId}_page_${page}`;
+});
+
+// При выборе жалобы — показываем детали и действия
+bot.hears(/^Жалоба #(\d+) /, async (ctx) => {
+    if (!ctx.session.isAdmin || !ctx.session.state?.startsWith("admin_panel_complaints_list_")) return;
+    const complaintTime = Number(ctx.match[1]);
+    const userId = Number(ctx.session.state.replace("admin_panel_complaints_list_", ""));
+    const idx = complaints.findIndex(c => c.userId === userId && c.date.getTime() === complaintTime);
+    if (idx === -1) {
+        await ctx.reply('Жалоба не найдена.', { reply_markup: new Keyboard().text("⬅️ Назад к жалобам пользователя").resized() });
+        return;
+    }
+    // Переносим жалобу в просмотренные
     const complaint = complaints[idx];
-    complaints.splice(idx, 1);
     reviewedComplaints.push({ ...complaint, status: "reviewed" });
-    // Уведомить пользователя
+    complaints.splice(idx, 1);
+    let message = `Жалоба пользователя #${userId}`;
+    if (userNames[userId]) message += ` (${userNames[userId]})`;
+    if (userEmails[userId]) message += `, email: ${userEmails[userId]}`;
+    message += `:\n\n${complaint.text}\nСтатус: просмотрено\nДата: ${complaint.date.toLocaleString()}`;
+    const kb = new Keyboard()
+        .text("Закрыть эту жалобу")
+        .row()
+        .text("⬅️ Назад к жалобам пользователя").resized();
+    await ctx.reply(message, { reply_markup: kb });
+    ctx.session.state = `admin_panel_complaint_detail_${userId}_${complaintTime}`;
+});
+
+// Закрыть одну жалобу
+bot.hears("Закрыть эту жалобу", async (ctx) => {
+    if (!ctx.session.isAdmin || !ctx.session.state?.startsWith("admin_panel_complaint_detail_")) return;
+    const parts = ctx.session.state.replace("admin_panel_complaint_detail_", "").split("_");
+    const userId = Number(parts[0]);
+    const complaintTime = Number(parts[1]);
+    const idx = reviewedComplaints.findIndex(c => c.userId === userId && c.date.getTime() === complaintTime && c.status === "reviewed");
+    if (idx === -1) {
+        await ctx.reply('Жалоба не найдена или уже закрыта.', { reply_markup: new Keyboard().text("⬅️ Назад к жалобам пользователя").resized() });
+        return;
+    }
+    finishedComplaints.push({ ...reviewedComplaints[idx], status: "closed" });
+    reviewedComplaints.splice(idx, 1);
     try {
-        await bot.api.sendMessage(userId, 'Ваша жалоба/предложение была рассмотрена администрацией.');
+        await bot.api.sendMessage(userId, 'Ваша жалоба/предложение была закрыта администрацией.');
     } catch {}
-    await ctx.reply('Жалоба отмечена как рассмотренная и перемещена в соответствующий раздел.', { reply_markup: adminPanelMenu() });
-    ctx.session.state = "admin_panel";
+    await ctx.reply('Жалоба закрыта и перемещена в завершённые.', { reply_markup: new Keyboard().text("⬅️ Назад к жалобам пользователя").resized() });
+    ctx.session.state = `admin_panel_complaints_list_${userId}`;
+});
+
+// Назад к списку жалоб пользователя
+bot.hears("⬅️ Назад к жалобам пользователя", async (ctx) => {
+    if (!ctx.session.isAdmin) return;
+    let userId: number | undefined = undefined;
+    if (ctx.session.state?.startsWith("admin_panel_complaint_detail_")) {
+        const parts = ctx.session.state.replace("admin_panel_complaint_detail_", "").split("_");
+        userId = Number(parts[0]);
+    } else if (ctx.session.state?.startsWith("admin_panel_complaints_list_")) {
+        userId = Number(ctx.session.state.replace("admin_panel_complaints_list_", ""));
+    }
+    if (!userId) return;
+    // Собираем жалобы пользователя (только новые)
+    const userComplaints = complaints.filter(c => c.userId === userId);
+    if (userComplaints.length === 0) {
+        await ctx.reply('Жалоб у пользователя нет.', { reply_markup: new Keyboard().text("⬅️ Назад к пользователям").resized() });
+        ctx.session.state = "admin_panel_complaints_users";
+        return;
+    }
+    const kb = new Keyboard();
+    userComplaints.forEach((complaint, idx) => {
+        const shortText = complaint.text.length > 20 ? complaint.text.slice(0, 20) + '...' : complaint.text;
+        kb.text(`Жалоба #${complaint.date.getTime()} (${shortText})`);
+        if ((idx + 1) % 1 === 0) kb.row();
+    });
+    kb.text("⬅️ Назад к пользователям").resized();
+    await ctx.reply('Выберите жалобу для просмотра:', { reply_markup: kb });
+    ctx.session.state = `admin_panel_complaints_list_${userId}`;
 });
 
 // FAQ управление
@@ -401,20 +561,6 @@ bot.hears("📬 Истории о профессии", async (ctx) => {
     ctx.session.state = "admin_panel_profession_stories";
 });
 
-// Статистика
-bot.hears("📊 Статистика", async (ctx) => {
-    if (!ctx.session.isAdmin || ctx.session.state !== "admin_panel") return;
-    await ctx.reply(
-        '📊 Статистика бота:\n\n' +
-        '👥 Всего пользователей: XXX\n' +
-        '💬 Сообщений за сегодня: XXX\n' +
-        '❓ Вопросов в обработке: XXX\n' +
-        '✅ Успешных ответов: XXX',
-        { reply_markup: new Keyboard().text("⬅️ Назад в админ-панель").resized() }
-    );
-    ctx.session.state = "admin_panel_stats";
-});
-
 // Возврат в админ-панель из подменю
 bot.hears("⬅️ Назад в админ-панель", async (ctx) => {
     if (!ctx.session.isAdmin) return;
@@ -428,42 +574,29 @@ bot.hears("⬅️ Выйти в меню пользователя", async (ctx) 
     await ctx.reply("Главное меню:", { reply_markup: mainMenu(ctx.session.isAdmin, ctx.from?.id) });
 });
 
-// FAQ добавление/удаление (только если в режиме FAQ админ-панели)
-bot.on("message:text", async (ctx, next) => {
-    if (ctx.session.state === "admin_panel_faq" && ctx.session.isAdmin) {
-        const text = ctx.message?.text ?? "";
-        if (text.startsWith("Вопрос:") && text.includes("Ответ:")) {
-            const q = text.split("Вопрос:")[1].split("Ответ:")[0].trim();
-            const a = text.split("Ответ:")[1].trim();
-            faqs.push({ question: q, answer: a });
-            await ctx.reply("FAQ добавлен.", { reply_markup: new Keyboard().text("⬅️ Назад в админ-панель").resized() });
-        } else if (text.toLowerCase().startsWith("удалить")) {
-            const num = parseInt(text.replace(/[^0-9]/g, ""), 10);
-            if (!isNaN(num) && num > 0 && num <= faqs.length) {
-                faqs.splice(num - 1, 1);
-                await ctx.reply("FAQ удалён.", { reply_markup: new Keyboard().text("⬅️ Назад в админ-панель").resized() });
-            } else {
-                await ctx.reply("Некорректный номер.", { reply_markup: new Keyboard().text("⬅️ Назад в админ-панель").resized() });
-            }
-        } else {
-            await ctx.reply("Некорректный формат. Попробуйте снова.", { reply_markup: new Keyboard().text("⬅️ Назад в админ-панель").resized() });
-        }
-        return;
-    }
-    await next();
-});
-
-// Жалоба/предложение
+// Жалоба/предложение с лимитом на одну активную жалобу
 bot.hears("✉️ Жалоба/Предложение", async (ctx) => {
     if (!ctx.from?.id) return;
-    if (!userNames[ctx.from.id]) {
+    const userId = ctx.from.id;
+    // Лимит: только если нет активных жалоб (new/reviewed)
+    const activeComplaints = [
+        ...complaints.filter(c => c.userId === userId),
+        ...reviewedComplaints.filter(c => c.userId === userId)
+    ];
+    if (activeComplaints.length > 0) {
+        await ctx.reply("Ваша жалоба ещё не рассмотрена. Вы сможете отправить новую, когда администратор закроет предыдущую.", {
+            reply_markup: mainMenu(ctx.session.isAdmin, ctx.from?.id)
+        });
+        return;
+    }
+    if (!userNames[userId]) {
         ctx.session.state = "awaiting_name_for_complaint";
         await ctx.reply("Пожалуйста, укажите, как к вам обращаться (ФИО):", {
             reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized()
         });
         return;
     }
-    if (!userEmails[ctx.from.id]) {
+    if (!userEmails[userId]) {
         ctx.session.state = "awaiting_email_for_complaint";
         await ctx.reply("Пожалуйста, укажите ваш email:", {
             reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized()
@@ -484,20 +617,21 @@ bot.hears("⬅️ Выйти в меню", async (ctx) => {
 
 // Кнопка '🔍 Поиск ответа' — активирует режим поиска
 bot.hears("🔍 Поиск ответа", async (ctx) => {
-        ctx.session.state = 'search';
+    ctx.session.state = 'search';
     await ctx.reply('Введите ваш вопрос, и я постараюсь найти ответ!', {
         reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized()
     });
 });
 
-// --- Валидация email ---
-function isValidEmail(email: string): boolean {
-    // Простой, но строгий паттерн
-    return /^[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}$/.test(email.trim());
-}
-
-// Обработка текстовых сообщений
+// AI-поиск: обработка текстового сообщения в режиме поиска
 bot.on("message:text", async (ctx, next) => {
+    if (ctx.session.state === 'search') {
+        await ctx.reply('Подождите, сейчас отвечу...');
+        const answer = await processUserMessage(ctx.message.text);
+        await ctx.reply(answer, { reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized() });
+        ctx.session.state = undefined;
+        return;
+    }
     // Сохраняем ФИО для жалобы
     if (ctx.session.state === "awaiting_name_for_complaint") {
         if (!ctx.from?.id) return;
@@ -575,7 +709,35 @@ bot.on("message:text", async (ctx, next) => {
     await next();
 });
 
+// Обработчик кнопки '⬅️ Назад к пользователям' — возврат к списку пользователей с жалобами
+bot.hears("⬅️ Назад к пользователям", async (ctx) => {
+    if (!ctx.session.isAdmin) return;
+    // Собираем userId с жалобами (новые и просмотренные)
+    const userIds = [...new Set(complaints.map(c => c.userId).concat(reviewedComplaints.filter(c => c.status === "reviewed").map(c => c.userId)))];
+    if (userIds.length === 0) {
+        await ctx.reply('Жалоб нет.', { reply_markup: new Keyboard().text("⬅️ Назад в админ-панель").resized() });
+        ctx.session.state = "admin_panel_complaints_users";
+        return;
+    }
+    const kb = new Keyboard();
+    userIds.forEach((userId, idx) => {
+        const name = userNames[userId] ? ` (${userNames[userId]})` : '';
+        const email = userEmails[userId] ? `, email: ${userEmails[userId]}` : '';
+        kb.text(`Пользователь #${userId}${name}${email}`);
+        if ((idx + 1) % 1 === 0) kb.row();
+    });
+    kb.text("⬅️ Назад в админ-панель").resized();
+    await ctx.reply('Выберите пользователя для просмотра жалоб:', { reply_markup: kb });
+    ctx.session.state = "admin_panel_complaints_users";
+});
+
 export const startBot = () => {
     console.log('Bot starting');
     return bot.start();
 };
+
+// --- Валидация email ---
+function isValidEmail(email: string): boolean {
+    // Простой, но строгий паттерн
+    return /^[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}$/.test(email.trim());
+}
