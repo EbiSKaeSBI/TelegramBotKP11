@@ -9,6 +9,7 @@ import { SessionData, FAQ, Complaint, MyContext } from './types';
 import { sessionMiddleware, adminCheckMiddleware, errorHandler } from './middleware';
 import * as complaintService from './services/complaints';
 import * as userService from './services/users';
+import * as professionStoriesService from './services/professionStories';
 
 // Проверяем наличие токена
 if (!process.env.TELEGRAM_BOT_TOKEN) {
@@ -150,24 +151,20 @@ bot.hears("📄 Мои обращения", async (ctx) => {
     if (!ctx.from?.id) return;
     const userId = ctx.from.id;
     let message = 'Ваши жалобы/предложения:\n\n';
-    const myComplaints = [
-        ...complaints.filter(c => c.userId === userId),
-        ...reviewedComplaints.filter(c => c.userId === userId),
-        ...finishedComplaints.filter(c => c.userId === userId)
-    ];
+    const myComplaints = await complaintService.getUserComplaints(userId);
     if (myComplaints.length === 0) message += 'Жалоб/предложений нет.';
-    myComplaints.forEach(complaint => {
+    myComplaints.forEach((complaint: any) => {
         let statusDisplay: string;
-        if (complaint.status === 'closed') statusDisplay = 'завершена';
-        else if (complaint.status === 'reviewed') statusDisplay = 'рассмотрена';
+        if (complaint.status === 'CLOSED') statusDisplay = 'завершена';
+        else if (complaint.status === 'REVIEWED') statusDisplay = 'рассмотрена';
         else statusDisplay = 'новая';
-        message += `• ${complaint.text}\nСтатус: ${statusDisplay}\nДата: ${complaint.date.toLocaleString()}\n\n`;
+        message += `• ${complaint.text}\nСтатус: ${statusDisplay}\nДата: ${complaint.createdAt.toLocaleString()}\n\n`;
     });
     message += '\nВаши рассказы о профессии:\n\n';
-    const myStories = professionStories.filter(s => s.userId === userId);
+    const myStories = await professionStoriesService.getUserStories(userId);
     if (myStories.length === 0) message += 'Рассказов нет.';
-    myStories.forEach(story => {
-        message += `• ${story.text}\nСтатус: ${story.status}\nДата: ${story.date.toLocaleString()}\n\n`;
+    myStories.forEach((story: any) => {
+        message += `• ${story.text}\nСтатус: ${story.status}\nДата: ${story.createdAt.toLocaleString()}\n\n`;
     });
     // Если сообщение слишком длинное, разбиваем на части
     const chunkSize = 3500;
@@ -333,14 +330,15 @@ bot.hears("🕊️ Служба примирения", async (ctx) => {
 
 bot.hears("🗣️ Хочу рассказать о своей профессии", async (ctx) => {
     if (!ctx.from?.id) return;
-    if (!userNames[ctx.from.id]) {
+    const user = await userService.getUser(ctx.from.id);
+    if (!user?.name) {
         ctx.session.state = "awaiting_name_for_profession";
         await ctx.reply("Пожалуйста, укажите, как к вам обращаться (ФИО):", {
             reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized()
         });
         return;
     }
-    if (!userEmails[ctx.from.id]) {
+    if (!user?.email) {
         ctx.session.state = "awaiting_email_for_profession";
         await ctx.reply("Пожалуйста, укажите ваш email:", {
             reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized()
@@ -363,7 +361,7 @@ bot.hears("🛠️ Админ-панель", async (ctx) => {
 // Просмотр жалоб (теперь по userId)
 bot.hears("📋 Жалобы", async (ctx) => {
     if (!ctx.session.isAdmin || ctx.session.state !== "admin_panel") return;
-    const usersWithComplaints = await complaintService.getAllComplaintUsers();
+    const usersWithComplaints = await complaintService.getAllComplaintUsersWithActive();
     if (usersWithComplaints.length === 0) {
         await ctx.reply('Жалоб нет.', { reply_markup: new Keyboard().text("⬅️ Назад в админ-панель").resized() });
         return;
@@ -384,7 +382,7 @@ bot.hears("📋 Жалобы", async (ctx) => {
 bot.hears(/^Пользователь #(\d+)/, async (ctx) => {
     if (!ctx.session.isAdmin || ctx.session.state !== "admin_panel_complaints_users") return;
     const userId = Number(ctx.match[1]);
-    const userComplaints = await complaintService.getUserComplaints(userId);
+    const userComplaints = (await complaintService.getUserComplaints(userId)).filter((c: any) => c.status === 'NEW' || c.status === 'REVIEWED');
     if (userComplaints.length === 0) {
         await ctx.reply('Жалоб у пользователя нет.', { reply_markup: new Keyboard().text("⬅️ Назад к пользователям").resized() });
         return;
@@ -413,7 +411,7 @@ bot.hears("Далее", async (ctx) => {
     if (!match) return;
     const userId = Number(match[1]);
     let page = Number(match[2]);
-    const userComplaints = await complaintService.getUserComplaints(userId);
+    const userComplaints = (await complaintService.getUserComplaints(userId)).filter((c: any) => c.status === 'NEW' || c.status === 'REVIEWED');
     const pageSize = 4;
     const totalPages = Math.ceil(userComplaints.length / pageSize);
     if (page + 1 >= totalPages) return;
@@ -440,7 +438,7 @@ bot.hears("Назад", async (ctx) => {
     let page = Number(match[2]);
     if (page === 0) return;
     page--;
-    const userComplaints = await complaintService.getUserComplaints(userId);
+    const userComplaints = (await complaintService.getUserComplaints(userId)).filter((c: any) => c.status === 'NEW' || c.status === 'REVIEWED');
     const pageSize = 4;
     const totalPages = Math.ceil(userComplaints.length / pageSize);
     const complaintsPage = userComplaints.slice(page * pageSize, (page + 1) * pageSize);
@@ -511,7 +509,7 @@ bot.hears("⬅️ Назад к жалобам пользователя", async 
         userId = Number(ctx.session.state.replace("admin_panel_complaints_list_", ""));
     }
     if (!userId) return;
-    const userComplaints = await complaintService.getUserComplaints(userId);
+    const userComplaints = (await complaintService.getUserComplaints(userId)).filter((c: any) => c.status === 'NEW' || c.status === 'REVIEWED');
     if (userComplaints.length === 0) {
         await ctx.reply('Жалоб у пользователя нет.', { reply_markup: new Keyboard().text("⬅️ Назад к пользователям").resized() });
         ctx.session.state = "admin_panel_complaints_users";
@@ -530,7 +528,7 @@ bot.hears("⬅️ Назад к жалобам пользователя", async 
 // Обработчик кнопки '⬅️ Назад к пользователям' — возврат к списку пользователей с жалобами
 bot.hears("⬅️ Назад к пользователям", async (ctx) => {
     if (!ctx.session.isAdmin) return;
-    const usersWithComplaints = await complaintService.getAllComplaintUsers();
+    const usersWithComplaints = await complaintService.getAllComplaintUsersWithActive();
     if (usersWithComplaints.length === 0) {
         await ctx.reply('Жалоб нет.', { reply_markup: new Keyboard().text("⬅️ Назад в админ-панель").resized() });
         ctx.session.state = "admin_panel_complaints_users";
@@ -552,8 +550,15 @@ bot.hears("⬅️ Назад к пользователям", async (ctx) => {
 bot.hears("✉️ Жалоба/Предложение", async (ctx) => {
     if (!ctx.from?.id) return;
     const userId = ctx.from.id;
-    // Регистрируем пользователя, если его нет
-    await userService.upsertUser(userId);
+    // Не создаём нового пользователя, только ищем
+    const user = await userService.getUser(userId);
+    if (!user) {
+        ctx.session.state = "awaiting_name_for_complaint";
+        await ctx.reply("Пожалуйста, укажите, как к вам обращаться (ФИО):", {
+            reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized()
+        });
+        return;
+    }
     const activeComplaints = await complaintService.getActiveComplaints(userId);
     if (activeComplaints.length > 0) {
         await ctx.reply("Ваша жалоба ещё не рассмотрена. Вы сможете отправить новую, когда администратор закроет предыдущую.", {
@@ -561,15 +566,14 @@ bot.hears("✉️ Жалоба/Предложение", async (ctx) => {
         });
         return;
     }
-    const user = await userService.getUser(userId);
-    if (!user?.name) {
+    if (!user.name) {
         ctx.session.state = "awaiting_name_for_complaint";
         await ctx.reply("Пожалуйста, укажите, как к вам обращаться (ФИО):", {
             reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized()
         });
         return;
     }
-    if (!user?.email) {
+    if (!user.email) {
         ctx.session.state = "awaiting_email_for_complaint";
         await ctx.reply("Пожалуйста, укажите ваш email:", {
             reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized()
@@ -636,7 +640,7 @@ bot.on("message:text", async (ctx, next) => {
     // Сохраняем ФИО для рассказа о профессии
     if (ctx.session.state === "awaiting_name_for_profession") {
         if (!ctx.from?.id) return;
-        userNames[ctx.from.id] = ctx.message.text.trim();
+        await userService.upsertUser(ctx.from.id, ctx.message.text.trim());
         ctx.session.state = "awaiting_email_for_profession";
         await ctx.reply("Спасибо! Теперь укажите ваш email:", {
             reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized()
@@ -653,14 +657,40 @@ bot.on("message:text", async (ctx, next) => {
             });
             return;
         }
-        userEmails[ctx.from.id] = email;
+        const user = await userService.getUser(ctx.from.id);
+        await userService.upsertUser(ctx.from.id, user?.name ?? undefined, email);
         ctx.session.state = "awaiting_profession_story";
         await ctx.reply("Спасибо! Теперь расскажите о своей профессии. Просто отправьте текст.", {
             reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized()
         });
         return;
     }
-
+    // Изменение email в личном кабинете
+    if (ctx.session.state === "change_email") {
+        if (!ctx.from?.id) return;
+        const email = ctx.message.text.trim();
+        if (!isValidEmail(email)) {
+            await ctx.reply("Пожалуйста, введите корректный email (например, example@mail.ru):", {
+                reply_markup: parentCabinetMenu()
+            });
+            return;
+        }
+        const user = await userService.getUser(ctx.from.id);
+        await userService.upsertUser(ctx.from.id, user?.name ?? undefined, email);
+        ctx.session.state = "parent_cabinet";
+        await ctx.reply("Ваш email успешно изменён!", { reply_markup: parentCabinetMenu() });
+        return;
+    }
+    // Изменение ФИО в личном кабинете
+    if (ctx.session.state === "change_name") {
+        if (!ctx.from?.id) return;
+        const name = ctx.message.text.trim();
+        const user = await userService.getUser(ctx.from.id);
+        await userService.upsertUser(ctx.from.id, name, user?.email ?? undefined);
+        ctx.session.state = "parent_cabinet";
+        await ctx.reply("Ваши ФИО успешно изменены!", { reply_markup: parentCabinetMenu() });
+        return;
+    }
     // Обработка жалобы/предложения
     if (ctx.session.state === "awaiting_complaint") {
         if (!ctx.from?.id) {
@@ -673,6 +703,16 @@ bot.on("message:text", async (ctx, next) => {
         return;
     }
 
+    if (ctx.session.state === "awaiting_profession_story") {
+        if (!ctx.from?.id) return;
+        await professionStoriesService.addStory(ctx.from.id, ctx.message.text);
+        await ctx.reply("Спасибо! Ваш рассказ о профессии отправлен на рассмотрение.", {
+            reply_markup: await mainMenu(ctx.session.isAdmin, ctx.from?.id)
+        });
+        ctx.session.state = undefined;
+        return;
+    }
+
     await next();
 });
 
@@ -681,6 +721,32 @@ bot.hears("⬅️ Назад в админ-панель", async (ctx) => {
     if (!ctx.session.isAdmin) return;
     ctx.session.state = "admin_panel";
     await ctx.reply("Админ-панель:", { reply_markup: adminPanelMenu() });
+});
+
+// Обработчик кнопки '⬅️ Выйти в меню пользователя' — возврат в главное меню
+bot.hears("⬅️ Выйти в меню пользователя", async (ctx) => {
+    ctx.session.state = undefined;
+    await ctx.reply("Главное меню:", { reply_markup: await mainMenu(ctx.session.isAdmin, ctx.from?.id) });
+});
+
+// Жалоба/предложение с лимитом на одну активную жалобу
+bot.hears("📬 Истории о профессии", async (ctx) => {
+    if (!ctx.session.isAdmin) return;
+    const stories = await professionStoriesService.getAllStories();
+    let message = '📬 Истории о профессии:\n\n';
+    if (stories.length === 0) message += 'Историй пока нет.';
+    for (const story of stories) {
+        const user = await userService.getUser(story.telegramId);
+        const name = user?.name ? ` (${user.name})` : '';
+        const email = user?.email ? `, email: ${user.email}` : '';
+        message += `#${story.telegramId}${name}${email}: ${story.text}\nСтатус: ${story.status}\nДата: ${story.createdAt.toLocaleString()}\n\n`;
+    }
+    // Если сообщение слишком длинное, разбиваем на части (Telegram лимит ~4096 символов)
+    const chunkSize = 3500;
+    for (let i = 0; i < message.length; i += chunkSize) {
+        await ctx.reply(message.slice(i, i + chunkSize), { reply_markup: new Keyboard().text("⬅️ Назад в админ-панель").resized() });
+    }
+    ctx.session.state = "admin_panel_profession_stories";
 });
 
 export const startBot = () => {

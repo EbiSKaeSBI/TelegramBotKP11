@@ -16,6 +16,21 @@ export async function getAllComplaintUsers() {
   });
 }
 
+export async function getAllComplaintUsersWithActive() {
+  // Получить только пользователей с активными жалобами (NEW или REVIEWED)
+  const active = await prisma.complaint.findMany({
+    where: {
+      OR: [
+        { status: ComplaintStatus.NEW },
+        { status: ComplaintStatus.REVIEWED }
+      ]
+    },
+    distinct: ['telegramId'],
+    select: { telegramId: true }
+  });
+  return active;
+}
+
 export async function addComplaint(telegramId: number | bigint, text: string) {
   return prisma.complaint.create({
     data: {
