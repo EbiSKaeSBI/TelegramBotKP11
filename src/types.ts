@@ -18,6 +18,7 @@ export interface SessionData {
         date: Date;
         status: "new" | "reviewed" | "closed";
     };
+    faqDraft?: { question: string };
 }
 
 export type FAQ = {
