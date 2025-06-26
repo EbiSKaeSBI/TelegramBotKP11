@@ -525,8 +525,6 @@ bot.on("message:text", async (ctx, next) => {
         try {
             // Проверяем, что пользователь ввел не пустое сообщение
             const userMessage = ctx.message.text?.trim();
-            console.log('🔍 Режим поиска - сообщение пользователя:', JSON.stringify(ctx.message.text));
-            console.log('🔍 Режим поиска - очищенное сообщение:', JSON.stringify(userMessage));
             
             if (!userMessage || userMessage === '') {
                 console.log('⚠️ Пользователь отправил пустое сообщение в режиме поиска');
@@ -984,12 +982,40 @@ function isValidEmail(email: string): boolean {
     return /^[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}$/.test(email.trim());
 }
 
-// Функция для безопасной отправки сообщений с Markdown
+// Функция для конвертации Markdown в HTML
+function markdownToHtml(text: string): string {
+    return text
+        // Жирный текст: **text** -> <b>text</b>
+        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+        // Курсив: *text* -> <i>text</i>
+        .replace(/\*(.*?)\*/g, '<i>$1</i>')
+        // Код: `text` -> <code>text</code>
+        .replace(/`(.*?)`/g, '<code>$1</code>')
+        // Ссылки: [text](url) -> <a href="url">text</a>
+        .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2">$1</a>')
+        // Заголовки: # text -> <b>text</b>
+        .replace(/^# (.*$)/gm, '<b>$1</b>')
+        // Списки: - item -> • item
+        .replace(/^- (.*$)/gm, '• $1')
+        // Переносы строк
+        .replace(/\n/g, '\n');
+}
+
+// Функция для безопасной отправки сообщений с HTML форматированием
 async function sendMessageWithMarkdown(ctx: any, text: string, reply_markup?: any) {
-    // Поскольку мы уже очистили текст от Markdown, отправляем как обычный текст
-    await ctx.reply(text, {
-        reply_markup
-    });
+    try {
+        // Конвертируем Markdown в HTML
+        const htmlText = markdownToHtml(text);
+        await ctx.reply(htmlText, {
+            parse_mode: 'HTML',
+            reply_markup
+        });
+    } catch (error) {
+        console.warn('⚠️ Ошибка при отправке с HTML, отправляем как обычный текст:', error);
+        await ctx.reply(text, {
+            reply_markup
+        });
+    }
 }
 
 // Обработчик кнопки "⬅️ Назад" - возврат в главное меню

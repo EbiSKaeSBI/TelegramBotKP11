@@ -1,32 +1,3 @@
-// Функция для экранирования специальных символов в MarkdownV2
-function escapeMarkdown(text: string): string {
-    const specialChars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'];
-    let escaped = text;
-    
-    for (const char of specialChars) {
-        escaped = escaped.replace(new RegExp(`\\${char}`, 'g'), `\\${char}`);
-    }
-    
-    return escaped;
-}
-
-// Функция для удаления Markdown-разметки
-function removeMarkdown(text: string): string {
-    // Удаляем **, __, *, _, ``, `, ~~, >, [, ], (, ), #, -, =, |, {, }, ., !
-    return text
-        .replace(/\*\*([^*]+)\*\*/g, '$1') // **bold**
-        .replace(/__([^_]+)__/g, '$1') // __bold__
-        .replace(/\*([^*]+)\*/g, '$1') // *italic* or *bold*
-        .replace(/_([^_]+)_/g, '$1') // _italic_ or _bold_
-        .replace(/~~([^~]+)~~/g, '$1') // ~~strikethrough~~
-        .replace(/`([^`]+)`/g, '$1') // `code`
-        .replace(/```[\s\S]*?```/g, '') // ```code block```
-        .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1') // [text](url)
-        .replace(/[\[\]()>#\-=|{}.!`~]/g, '') // одиночные символы (убрал +)
-        .replace(/\n{2,}/g, '\n') // двойные переводы строк в один
-        .replace(/^\s+|\s+$/g, ''); // обрезаем пробелы
-}
-
 // Проверка доступности Flowise API
 function isFlowiseAvailable(): boolean {
     return !!(process.env.FLOWISE_API_URL && process.env.FLOWISE_API_KEY);
@@ -34,7 +5,6 @@ function isFlowiseAvailable(): boolean {
 
 async function query(data: { question: string }): Promise<any> {
     console.log('🚀 Отправка запроса к Flowise AI...');
-    console.log('📤 Отправляемые данные:', JSON.stringify(data, null, 2));
     
     // Проверяем доступность API
     if (!isFlowiseAvailable()) {
@@ -54,9 +24,6 @@ async function query(data: { question: string }): Promise<any> {
             }
         );
         
-        console.log('📡 Статус ответа:', response.status);
-        console.log('📡 Статус текст:', response.statusText);
-        
         if (!response.ok) {
             console.error('❌ Ошибка HTTP:', response.status, response.statusText);
             
@@ -74,14 +41,7 @@ async function query(data: { question: string }): Promise<any> {
         }
         
         const result: any = await response.json();
-        console.log('✅ Ответ получен от AI:');
-        console.log('📥 Полный ответ:', JSON.stringify(result, null, 2));
-        
-        if (result.response) {
-            console.log('🤖 Ответ AI:', result.response);
-        } else {
-            console.warn('⚠️ В ответе нет поля "response"');
-        }
+        console.log('✅ Ответ получен от AI');
         
         return result;
     } catch (error) {
@@ -91,7 +51,7 @@ async function query(data: { question: string }): Promise<any> {
 }
 
 export async function processUserMessage(userMessage: string): Promise<string> {
-    console.log('👤 Получено сообщение пользователя:', userMessage);
+    console.log('👤 Запрос пользователя:', userMessage);
     
     try {
         // Проверяем доступность Flowise
@@ -100,15 +60,12 @@ export async function processUserMessage(userMessage: string): Promise<string> {
         }
         
         const response = await query({ "question": userMessage });
-        console.log('✅ Сообщение успешно обработано AI');
         
-        // Проверяем структуру ответа - может быть 'text' или 'response'
+        // Берем текст из поля 'text' в JSON ответе
         let aiResponse = '';
         if (response.text) {
-            console.log('🤖 Ответ AI (text):', response.text);
             aiResponse = response.text;
         } else if (response.response) {
-            console.log('🤖 Ответ AI (response):', response.response);
             aiResponse = response.response;
         } else {
             console.warn('⚠️ Неизвестная структура ответа:', response);
@@ -122,17 +79,15 @@ export async function processUserMessage(userMessage: string): Promise<string> {
             return 'Извините, не удалось получить ответ на ваш вопрос. Попробуйте переформулировать вопрос или используйте раздел "Ответы на часто задаваемые вопросы".';
         }
         
-        // Убираем лишние символы новой строки в начале и конце
+        // Убираем лишние символы новой строки в начале и конце, но сохраняем Markdown форматирование
         const cleanResponse = trimmedResponse.replace(/^\n+|\n+$/g, '');
         if (!cleanResponse) {
             return 'Извините, не удалось получить осмысленный ответ на ваш вопрос. Попробуйте переформулировать вопрос.';
         }
         
-        // Удаляем все маркеры Markdown
-        const plainResponse = removeMarkdown(cleanResponse);
-        console.log('📝 Ответ без Markdown:', plainResponse);
+        console.log('✅ AI ответ обработан успешно');
         
-        return plainResponse;
+        return cleanResponse;
     } catch (error) {
         console.error('❌ Ошибка в FlowiseAI processing:', error);
         
