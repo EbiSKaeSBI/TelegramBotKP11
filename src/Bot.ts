@@ -26,7 +26,7 @@ async function mainMenu(isAdmin = false, userId?: number) {
         .text("✉️ Жалоба/Предложение")
         .row()
         .text("🧭 Профориентация")
-        .text("🔍 Поиск ответа");
+        .text("🧠 Нейроответ");
     if (userId) {
         const user = await userService.getUser(userId);
         if (user) {
@@ -645,8 +645,8 @@ bot.hears("⬅️ Выйти в меню", async (ctx) => {
     await ctx.reply("Главное меню:", { reply_markup: await mainMenu(ctx.session.isAdmin, ctx.from?.id) });
 });
 
-// Кнопка '🔍 Поиск ответа' — активирует режим поиска
-bot.hears("🔍 Поиск ответа", async (ctx) => {
+// Кнопка '🧠 Нейроответ' — активирует режим поиска
+bot.hears("🧠 Нейроответ", async (ctx) => {
     ctx.session.state = 'search';
     await ctx.reply('Введите ваш вопрос, и я постараюсь найти ответ!', {
         reply_markup: new Keyboard().text("⬅️ Выйти в меню").resized()
