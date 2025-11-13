@@ -65,6 +65,7 @@ docker compose up -d --build
 # Просмотр логов
 docker compose logs -f telegram-bot
 ```
+#### Если у вас не билдится docker попробуйте изменить кодировку у .env файла на UTF-8
 
 #### 4. Остановка
 ```bash
